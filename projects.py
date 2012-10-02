@@ -238,6 +238,7 @@ class Project(object):
     def __init__(self, pid):
         self.pid = pid
         self.ui = ui.ui()
+        self.ui.setconfig('ui', 'report_untrusted', 'off')
         self.repo = hg.repository(self.ui, self.path)
         hgrc = os.path.join(self.path, '.hg', 'hgrc')
         if os.path.exists(hgrc):
@@ -246,7 +247,7 @@ class Project(object):
 
     @locked_cached_property
     def enabled(self):
-        return self.ui.configbool('project', 'enabled')
+        return self.ui.configbool('project', 'enabled', untrusted=True)
 
     @locked_cached_property
     def path(self):
@@ -258,18 +259,18 @@ class Project(object):
 
     @locked_cached_property
     def description(self):
-        rv = self.ui.config('project', 'description')
+        rv = self.ui.config('project', 'description', untrusted=True)
         if rv is None:  # defaults to hgweb description
-            rv = self.ui.config('web', 'description')
+            rv = self.ui.config('web', 'description', untrusted=True)
         return rv
 
     @locked_cached_property
     def homepage(self):
-        return self.ui.config('project', 'homepage')
+        return self.ui.config('project', 'homepage', untrusted=True)
 
     @locked_cached_property
     def license(self):
-        return self.ui.config('project', 'license')
+        return self.ui.config('project', 'license', untrusted=True)
 
     @locked_cached_property
     def versions(self):
