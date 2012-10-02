@@ -241,7 +241,7 @@ class Project(object):
         self.repo = hg.repository(self.ui, self.path)
         hgrc = os.path.join(self.path, '.hg', 'hgrc')
         if os.path.exists(hgrc):
-            self.ui.readconfig(hgrc)
+            self.ui.readconfig(hgrc, Trust=True)
         self.ctx = self.repo[None]
 
     @locked_cached_property
