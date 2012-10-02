@@ -243,7 +243,7 @@ class Project(object):
         hgrc = os.path.join(self.path, '.hg', 'hgrc')
         if os.path.exists(hgrc):
             self.ui.readconfig(hgrc, trust=True)
-        self.ctx = self.repo[None]
+        self.ctx = self.repo['default']  # use default branch
 
     @locked_cached_property
     def enabled(self):
