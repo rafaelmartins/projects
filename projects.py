@@ -26,7 +26,7 @@ template = u"""\
     <head>
         <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
         <title>{% if project %}{{ project.project_name }}{%
-            else %}Rafael Martins' Projects{% endif %}</title>
+            else %}My Projects{% endif %}</title>
         <link href="http://fonts.googleapis.com/css?family=Kreon:400,700"
               rel="stylesheet" type="text/css">
         <link href="http://fonts.googleapis.com/css?family=Droid+Sans:400,700"
@@ -77,6 +77,10 @@ template = u"""\
                 font-family: 'Kreon', serif;
                 text-align: center;
                 list-style: none;
+                font-size: 20px;
+            }
+
+            #list-projects li a {
                 font-size: 28px;
             }
             #list-projects ul {
@@ -110,7 +114,7 @@ template = u"""\
     </head>
     <body>
         <h1>{% if project %}{{ project.project_name }}{%
-            else %}Rafael Martins' Projects{% endif %}</h1>
+            else %}My Projects{% endif %}</h1>
         {%- if project %}
         <div id="project">
             <table>
@@ -171,8 +175,11 @@ template = u"""\
         <div id="list-projects">
             <ul>
                 {%- for project in projects %}
-                <li><a href="{{ url_for('show_project', project=project) }}">{{
-                    project }}</a></li>
+                <li><a href="{{ url_for('show_project',
+                    project=project.project_name) }}">{{
+                    project.project_name }}</a>{% if
+                    project.description %} - {{
+                    project.description }}{% endif %}</li>
                 {%- endfor %}
             </ul>
         </div>
@@ -376,7 +383,7 @@ class Project(object):
 
 @app.route('/')
 def main():
-    return render_template_string(template, projects=g.projects)
+    return render_template_string(template, projects=g.projects.values())
 
 
 @app.route('/<project>/')
