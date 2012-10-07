@@ -73,22 +73,18 @@ template = u"""\
                 padding-left: 20px;
                 padding-bottom: 16px;
             }
-            #list-projects ul, #list-projects li {
+            #list-projects table {
                 font-family: 'Kreon', serif;
-                text-align: center;
-                list-style: none;
                 font-size: 20px;
-            }
-
-            #list-projects li a {
-                font-size: 28px;
-            }
-            #list-projects ul {
                 margin: 40px auto;
                 padding: 0;
             }
-            #list-projects li {
-                margin: 15px auto;
+            #list-projects th, #list-projects td {
+                text-align: left;
+                padding: 2px 15px;
+            }
+            #list-projects table th {
+                font-size: 28px;
             }
             #project table {
                 margin: 16px auto;
@@ -173,20 +169,23 @@ template = u"""\
         </div>
         {%- else %}
         <div id="list-projects">
-            <ul>
+            <table>
                 {%- for project in projects %}
-                <li><a href="{{ url_for('show_project',
-                    project=project.project_name) }}">{{
-                    project.project_name }}</a>{% if
-                    project.description %} - {{
-                    project.description }}{% endif %}</li>
+                <tr>
+                    <th><a href="{{ url_for('show_project',
+                        project=project.project_name) }}">{{
+                        project.project_name }}</a></th>
+                    <td>{% if project.description %}{{
+                        project.description|truncate(80) }}{%
+                        else %}&nbsp;{% endif %}</td>
+                </tr>
                 {%- endfor %}
-            </ul>
+            </table>
         </div>
         {%- endif %}
         <hr>
         <div id="footer">
-            &copy 2012. Rafael G. Martins. Web pages generated automatically
+            &copy;2012. Rafael G. Martins. Web pages generated automatically
             from my <a href="http://hg.rafaelmartins.eng.br/">Mercurial
             repositories</a>.<br />Cache date: {{ cache_date|datetimeformat }}
         </div>
