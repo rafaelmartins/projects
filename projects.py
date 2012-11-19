@@ -12,11 +12,10 @@
 from collections import OrderedDict
 from datetime import datetime
 from docutils.core import publish_parts
-from flask import Flask, Markup, abort, g, render_template_string
+from flask import Flask, Markup, abort, render_template_string
 from flask.helpers import locked_cached_property
 from flask.ext.babel import Babel
-from mercurial import hg, ui
-from werkzeug.contrib.cache import FileSystemCache
+from mercurial import hg, ui as _ui
 import os
 import re
 
@@ -187,7 +186,7 @@ template = u"""\
         <div id="footer">
             &copy;2012. Rafael G. Martins. Web pages generated automatically
             from my <a href="http://hg.rafaelmartins.eng.br/">Mercurial
-            repositories</a>.<br />Cache date: {{ cache_date|datetimeformat }}
+            repositories</a>.
         </div>
     </body>
 </html>
@@ -200,8 +199,6 @@ app = Flask(__name__)
 babel = Babel(app)
 
 app.config.from_envvar('PROJECTS_SETTINGS', True)
-app.config.setdefault('CACHE_DIR', '/tmp/projects')
-app.config.setdefault('CACHE_TIMEOUT', 3600)  # in seconds
 app.config.setdefault('TIMEZONE', 'UTC')
 app.config.setdefault('REPO_BASEDIR', '/home/rafael/dev/mercurial/pub')
 app.config.setdefault('DIST_BASEDIR', '/home/rafael/dev/files')
@@ -209,120 +206,20 @@ app.config.setdefault('REPO_BASEURL', 'http://hg.rafaelmartins.eng.br')
 app.config.setdefault('DIST_BASEURL', 'http://distfiles.rafaelmartins.eng.br')
 
 
-def generate_cache():
-    """This function handles all the expensive operations that involves the
-    Mercurial API, directory lookups and rst parsing, returning a big dict
-    suitable for caching.
-
-    Dict format::
-
-        {
-            "projects": {
-                "a": {
-                    "homepage": "http://foo.com",
-                    "versions": [
-                        ("1", datetime(...), "/home/foo/files/a-1.tar.gz"),
-                        ...
-                    ],
-                    ...
-                },
-                ...
-            },
-            "cache_date": datetime(...),
-        }
-    """
-    base_ui = ui.ui()  # our base ui, will be copied by each project
-    base_ui.setconfig('ui', 'report_untrusted', 'off')
-    rv = {'projects': {}, 'cache_date': datetime.now()}
-    for project_name in os.listdir(app.config['REPO_BASEDIR']):
-        project_dir = os.path.join(app.config['REPO_BASEDIR'], project_name)
-        if not os.path.exists(os.path.join(project_dir, '.hg')):  # not a repo!
-            continue
-        project_ui = base_ui.copy()
-        project_hgrc = os.path.join(project_dir, '.hg', 'hgrc')
-        if os.path.exists(project_hgrc):
-            project_ui.readconfig(project_hgrc, trust=True)
-        project_repo = hg.repository(project_ui, project_dir)
-        if not project_ui.configbool('project', 'enabled', untrusted=True):
-            continue
-        rv['projects'][project_name] = \
-            dict(project_ui.configitems('project', untrusted=True))
-        if 'description' not in rv['projects'][project_name]:
-            rv['projects'][project_name]['description'] = \
-                project_ui.config('web', 'description')
-        rv['projects'][project_name]['versions'] = []
-        # fill versions
-        versions = []
-        for version, version_hash in project_repo.tagslist():
-            if not re_version.match(version):
-                continue
-            # look for distfile
-            distfile = None
-            distfile_url = None
-            for extension in ['tar.xz', 'tar.bz2', 'tar.gz']:
-                _distfile = os.path.join(app.config['DIST_BASEDIR'],
-                                         project_name,
-                                         '%s-%s.%s' % (project_name, version,
-                                                       extension))
-                if os.path.exists(_distfile):
-                    distfile = _distfile
-                    break
-            if distfile:
-                distfile_url = app.config['DIST_BASEURL'].rstrip('/') + '/' + \
-                    project_name + '/' + os.path.basename(distfile)
-            version_timestamp = project_repo[version_hash].date()[0]
-            version_date = datetime.utcfromtimestamp(version_timestamp)
-            versions.append((version, version_date, distfile_url))
-        rv['projects'][project_name]['versions'] = versions
-        # look for an usable README file. README.rst is preferred, but some
-        # projects may have README too. in any case this file should be written
-        # in reStructuredText.
-        default_branch = None
-        branches = project_repo.branchtags()
-        if 'default' in branches:
-            default_branch = branches['default']
-        default_ctx = project_repo[default_branch]  # use default branch
-        fctx = None
-        for readme in ['README.rst', 'README']:
-            if readme in default_ctx:
-                fctx = default_ctx[readme]
-                break
-        readme = None
-        if fctx:
-            rst = fctx.data()
-            settings = {'input_encoding': 'utf-8', 'output_encoding': 'utf-8',
-                        'initial_header_level': 2}
-            parts = publish_parts(source=rst, writer_name='html4css1',
-                                  settings_overrides=settings)
-            readme = {'title': Markup(parts['title']),
-                      'fragment': Markup(parts['fragment'])}
-        rv['projects'][project_name]['readme'] = readme
-    return rv
-
-
 @app.before_first_request
 def before_first_request():
-    # drop old cache when initializing the app
-    g.cache_obj = FileSystemCache(app.config['CACHE_DIR'],
-                                  default_timeout=app.config['CACHE_TIMEOUT'])
-    cache = generate_cache()
-    g.cache_obj.set('projects', cache)
-    g.cache = cache
-    g.projects = Project.from_all_repositories()
+    app.projects = Project.from_all_repositories(app.config['REPO_BASEDIR'],
+                                                 app.config['REPO_BASEURL'],
+                                                 app.config['DIST_BASEDIR'],
+                                                 app.config['DIST_BASEURL'])
 
 
 @app.before_request
 def before_request():
-    if hasattr(g, 'cache_obj'):  # already initialized
-        return
-    g.cache_obj = FileSystemCache(app.config['CACHE_DIR'],
-                                  default_timeout=app.config['CACHE_TIMEOUT'])
-    cache = g.cache_obj.get('projects')
-    if cache is None:
-        cache = generate_cache()
-        g.cache_obj.set('projects', cache)
-    g.cache = cache
-    g.projects = Project.from_all_repositories()
+    projects = app.projects.keys()[:]
+    for project in projects:
+        if not app.projects[project].up2date:
+            app.projects[project] = app.projects[project].update()
 
 
 @babel.timezoneselector
@@ -330,51 +227,126 @@ def get_timezone():
     return app.config['TIMEZONE']
 
 
-@app.context_processor
-def jinja_ctx():
-    return {'cache_date': g.cache['cache_date']}
-
-
 class Project(object):
     """Main object, that represents a single project"""
 
-    def __init__(self, project_name):
+    def __init__(self, project_name, repo_basedir, repo_baseurl, dist_basedir,
+                 dist_baseurl, ui=None):
         self.project_name = project_name
+        self.repo_basedir = repo_basedir
+        self.repo_baseurl = repo_baseurl
+        self.dist_basedir = dist_basedir
+        self.dist_baseurl = dist_baseurl
+        self.ui = ui or _ui.ui()
+        self.ui.setconfig('ui', 'report_untrusted', 'off')
+        if not os.path.isdir(os.path.join(self.repo_path, '.hg')):
+            return
+        hgrc = os.path.join(self.repo_path, '.hg', 'hgrc')
+        if os.path.isfile(hgrc):
+            self.ui.readconfig(hgrc, trust=True)
+        self.repo = hg.repository(self.ui, self.repo_path)
+        default_branch = None
+        branches = self.repo.branchtags()
+        if 'default' in branches:
+            default_branch = branches['default']
+        self.default_ctx = self.repo[default_branch]  # use default branch
+
+    @property
+    def up2date(self):
+        repo = hg.repository(self.ui, self.repo_path)
+        default_branch = None
+        branches = repo.branchtags()
+        if 'default' in branches:
+            default_branch = branches['default']
+        ctx = repo[default_branch]
+        return ctx.rev() == self.default_ctx.rev()
 
     @locked_cached_property
-    def path(self):
-        return os.path.join(app.config['REPO_BASEDIR'], self.project_name)
+    def enabled(self):
+        return self.ui.configbool('project', 'enabled', default=False,
+                                  untrusted=True)
+
+    @locked_cached_property
+    def repo_path(self):
+        return os.path.join(self.repo_basedir, self.project_name)
 
     @locked_cached_property
     def repo_url(self):
-        return app.config['REPO_BASEURL'].rstrip('/') + '/' + self.project_name
+        return self.repo_baseurl.rstrip('/') + '/' + self.project_name
 
     @locked_cached_property
     def description(self):
-        return g.cache['projects'][self.project_name].get('description')
+        desc = self.ui.config('project', 'description', untrusted=True)
+        if desc is None:
+            desc = self.ui.config('web', 'description', untrusted=True)
+        return desc
 
     @locked_cached_property
     def homepage(self):
-        return g.cache['projects'][self.project_name].get('homepage')
+        return self.ui.config('project', 'homepage', untrusted=True)
 
     @locked_cached_property
     def license(self):
-        return g.cache['projects'][self.project_name].get('license')
+        return self.ui.config('project', 'license', untrusted=True)
 
     @locked_cached_property
     def versions(self):
-        return g.cache['projects'][self.project_name].get('versions')
+        versions = []
+        for version, version_hash in self.repo.tagslist():
+            if not re_version.match(version):
+                continue
+            # look for distfile
+            distfile = None
+            distfile_url = None
+            for extension in ['tar.xz', 'tar.bz2', 'tar.gz']:
+                _distfile = os.path.join(self.dist_basedir, self.project_name,
+                                         '%s-%s.%s' % (self.project_name,
+                                                       version, extension))
+                if os.path.isfile(_distfile):
+                    distfile = _distfile
+                    break
+            if distfile:
+                distfile_url = self.dist_baseurl.rstrip('/') + '/' + \
+                    self.project_name + '/' + os.path.basename(distfile)
+            version_timestamp = self.repo[version_hash].date()[0]
+            version_date = datetime.utcfromtimestamp(version_timestamp)
+            versions.append((version, version_date, distfile_url))
+        return versions
 
     @locked_cached_property
     def readme(self):
-        return g.cache['projects'][self.project_name].get('readme')
+        # look for an usable README file. README.rst is preferred, but some
+        # projects may have README too. in any case this file should be written
+        # in reStructuredText.
+        fctx = None
+        for readme in ['README.rst', 'README']:
+            if readme in self.default_ctx:
+                fctx = self.default_ctx[readme]
+                break
+        if fctx is None:
+            return
+        settings = {'input_encoding': 'utf-8', 'output_encoding': 'utf-8',
+                    'initial_header_level': 2}
+        parts = publish_parts(source=fctx.data(), writer_name='html4css1',
+                              settings_overrides=settings)
+        return {'title': Markup(parts['title']),
+                'fragment': Markup(parts['fragment'])}
 
     @classmethod
-    def from_all_repositories(cls):
+    def from_all_repositories(cls, repo_basedir, repo_baseurl, dist_basedir,
+                              dist_baseurl, ui=None):
         rv = OrderedDict()
-        for project_name in sorted(g.cache['projects'].keys()):
-            rv[project_name] = cls(project_name)
+        for project_name in os.listdir(repo_basedir):
+            obj = cls(project_name, repo_basedir, repo_baseurl,
+                      dist_basedir, dist_baseurl, ui=None)
+            if obj.enabled:
+                rv[project_name] = obj
         return rv
+
+    def update(self):
+        return self.__class__(self.project_name, self.repo_basedir,
+                              self.repo_baseurl, self.dist_basedir,
+                              self.dist_baseurl, self.ui)
 
     def __repr__(self):
         return '<%s: %s>' % (self.__class__.__name__, self.project_name)
@@ -382,12 +354,12 @@ class Project(object):
 
 @app.route('/')
 def main():
-    return render_template_string(template, projects=g.projects.values())
+    return render_template_string(template, projects=app.projects.values())
 
 
 @app.route('/<project>/')
 def show_project(project):
-    project = g.projects.get(project)
+    project = app.projects.get(project)
     if project is None:
         abort(404)
     return render_template_string(template, project=project)
