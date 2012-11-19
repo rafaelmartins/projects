@@ -336,7 +336,7 @@ class Project(object):
     def from_all_repositories(cls, repo_basedir, repo_baseurl, dist_basedir,
                               dist_baseurl, ui=None):
         rv = OrderedDict()
-        for project_name in os.listdir(repo_basedir):
+        for project_name in sorted(os.listdir(repo_basedir)):
             obj = cls(project_name, repo_basedir, repo_baseurl,
                       dist_basedir, dist_baseurl, ui=None)
             if obj.enabled:
